@@ -1,4 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f5ef">
+  <title>Пазлы по нашим историям</title>
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#f8f5ef;color:#252f38;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:560px;margin:auto;padding:20px 16px 36px} h1{font-size:1.55rem;line-height:1.2;margin:0 0 8px}
+    p{margin:8px 0 14px} select,.action{font:inherit;padding:10px 12px;border:1px solid #89949e;border-radius:10px;background:white;color:inherit}
+    select{display:block;width:100%;margin:4px 0 12px}.controls{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+    .action{cursor:pointer}.action:disabled,select:disabled{opacity:.65} button:focus-visible,select:focus-visible{outline:3px solid #1263b5;outline-offset:2px}
+    #board{display:grid;gap:2px;grid-template-columns:repeat(3,1fr);background:#fff;border-radius:8px;overflow:hidden}
+    .tile{display:block;margin:0;padding:0;min-width:0;border:0;aspect-ratio:1;background-repeat:no-repeat;cursor:pointer;touch-action:manipulation}
+    .tile[aria-pressed=true]{box-shadow:inset 0 0 0 5px #ffcb37}.tile:focus-visible{outline-offset:-4px}
+    #preview{max-width:100%;height:auto;border-radius:8px;margin:8px 0} #message{min-height:1.5em;font-weight:600}
+  </style>
+  <script defer src="https://unpkg.com/@vkontakte/vk-bridge@2/dist/browser.min.js"></script>
+</head>
+<body><main>
+  <h1>Пазлы по нашим историям</h1>
+  <p>Коснись одного кусочка, потом другого — они поменяются местами. Собери всю картинку!</p>
+  <label for="story">Выбери историю</label><select id="story"></select>
+  <div id="board" role="group" aria-label="Игровое поле"></div>
+  <div class="controls"><button id="again" class="action">Перемешать</button><button id="hint" class="action" aria-expanded="false" aria-controls="preview">Посмотреть образец</button></div>
+  <img id="preview" alt="Собранная иллюстрация" hidden>
+  <p id="message" role="status" aria-live="polite"></p>
+</main>
+<script>
+'use strict';
+// Добавляй новые сюжеты в этот список. Пути считаются от index.html.
+const stories = [
+  {title:'Рыжик-пилот', file:'ryzhik.jpg'},
   {title:'Тимоша и папа-супергерой', file:'timosha.jpg'},
   {title:'Ёжик Жора', file:'yozhik.jpg'},
   {title:'Друзья Жоры', file:'druzya-zhory.jpg'},
   {title:'Бегемотик Боня', file:'bonya.jpg'},
+];
+const $ = id => document.getElementById(id);
+const board=$('board'), story=$('story'), msg=$('message'), again=$('again'), hint=$('hint'), preview=$('preview');
+let imageUrl='', pieces=[], selected=-1, moves=0, finished=false, request=0;
+stories.forEach((s,i)=>story.add(new Option(s.title,i)));
+function resetHint(){ preview.hidden=true;hint.textContent='Посмотреть образец';hint.setAttribute('aria-expanded','false'); }
+function shuffle(){
+  pieces=Array.from({length:9},(_,i)=>i);
+  do { for(let i=8;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pieces[i],pieces[j]]=[pieces[j],pieces[i]];} }
+  while(pieces.every((p,i)=>p===i));
+  selected=-1;moves=0;finished=false;resetHint();msg.textContent='Найди два кусочка, которые хочешь поменять.';draw();
+}
+function draw(focus=-1){
+  board.replaceChildren();
+  pieces.forEach((piece,cell)=>{
+    const b=document.createElement('button');b.type='button';b.className='tile';
+    b.style.backgroundImage=`url("${imageUrl}")`;b.style.backgroundSize='300% 300%';
+    b.style.backgroundPosition=`${(piece%3)*50}% ${Math.floor(piece/3)*50}%`;
+    b.setAttribute('aria-label',`Клетка ${cell+1}, фрагмент ${piece+1}`);
+    b.setAttribute('aria-pressed',String(cell===selected)); b.disabled=finished;
+    b.onclick=()=>choose(cell);board.append(b);
+  });
+  if(focus>=0&&!finished)board.children[focus].focus({preventScroll:true});
+}
+function choose(cell){
+  if(finished)return;
+  if(selected===-1){selected=cell;msg.textContent='Теперь выбери второй кусочек.';}
+  else if(selected===cell){selected=-1;msg.textContent='Выбор отменён.';}
+  else{
+    [pieces[selected],pieces[cell]]=[pieces[cell],pieces[selected]];selected=-1;moves++;
+    finished=pieces.every((p,i)=>p===i);
+    msg.textContent=finished?`Получилось! Картинка собрана. Ходов: ${moves}.`:`Ходов: ${moves}. Выбери следующую пару.`;
+  }draw(cell);
+}
+function loadStory(){
+  const current=++request, s=stories[Number(story.value)], im=new Image();
+  board.replaceChildren();again.disabled=hint.disabled=true;resetHint();msg.textContent='Загружаем картинку…';
+  im.onload=()=>{
+    if(current!==request)return;
+    try{
+      // Квадратный фрагмент из центра; пропорции исходной иллюстрации сохраняются.
+      const side=Math.min(im.naturalWidth,im.naturalHeight),c=document.createElement('canvas');c.width=c.height=720;
+      c.getContext('2d').drawImage(im,(im.naturalWidth-side)/2,(im.naturalHeight-side)/2,side,side,0,0,720,720);
+      imageUrl=c.toDataURL('image/jpeg',.9);preview.src=imageUrl;again.disabled=hint.disabled=false;shuffle();
+    }catch{msg.textContent='Не удалось обработать картинку. Проверь, что файл лежит рядом с index.html и страница открыта по HTTPS.';}
+  };
+  im.onerror=()=>{if(current===request)msg.textContent=`Картинка не найдена. Проверь файл ${s.file}.`;}; im.src=s.file;
+}
+again.onclick=shuffle;hint.onclick=()=>{preview.hidden=!preview.hidden;hint.textContent=preview.hidden?'Посмотреть образец':'Скрыть образец';hint.setAttribute('aria-expanded',String(!preview.hidden));};
+story.onchange=loadStory;
+window.addEventListener('DOMContentLoaded',()=>{if(window.vkBridge)window.vkBridge.send('VKWebAppInit').catch(()=>{});});
+loadStory();
+</script></body></html>
